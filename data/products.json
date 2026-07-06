@@ -1,0 +1,20 @@
+{
+  "1": {
+    "name": "Dark Blade",
+    "description": "Sem descrição.",
+    "price": "40",
+    "image": "https://cdn.discordapp.com/attachments/1503554214146605256/1523319593228046336/images.png?ex=6a4bad6c&is=6a4a5bec&hm=4dd517728e9c900c3d8d5e39a9db36a903098c7ab31f6f4d2bdbd17d4d8f17fe&",
+    "stock": null,
+    "channel_id": 1523322465835548872,
+    "message_id": 1523354444324929679
+  },
+  "2": {
+    "name": "Legacy Pose",
+    "description": "Sem descrição.",
+    "price": "20",
+    "image": null,
+    "stock": 4,
+    "channel_id": 1523343201984053368,
+    "message_id": 1523343532180504690
+  }
+}
