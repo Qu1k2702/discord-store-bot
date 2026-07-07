@@ -19,6 +19,7 @@ class StoreBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         await self.load_extension("cogs.store")
+        await self.load_extension("cogs.cart")
         await self.load_extension("cogs.tickets")
 
         # Registra as views persistentes (botões continuam funcionando

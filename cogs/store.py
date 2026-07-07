@@ -20,20 +20,17 @@ def build_product_embed(product_id: str, product: dict) -> discord.Embed:
     return embed
 
 
-class BuyButton(discord.ui.Button):
+class CartButton(discord.ui.Button):
     def __init__(self, product_id: str):
         super().__init__(
-            label="Comprar",
+            label="Adicionar ao Carrinho",
             style=discord.ButtonStyle.success,
             emoji="🛒",
-            custom_id=f"buy_product:{product_id}",
+            custom_id=f"cart_add:{product_id}",
         )
         self.product_id = product_id
 
     async def callback(self, interaction: discord.Interaction) -> None:
-        # Import local para evitar dependência circular entre os cogs
-        from cogs.tickets import create_ticket_for_product
-
         products = storage.load_products()
         product = products.get(self.product_id)
 
@@ -43,16 +40,27 @@ class BuyButton(discord.ui.Button):
             )
             return
 
-        await create_ticket_for_product(interaction, self.product_id, product)
+        carts = storage.load_carts()
+        user_key = str(interaction.user.id)
+        cart = carts.get(user_key, {})
+        cart[self.product_id] = cart.get(self.product_id, 0) + 1
+        carts[user_key] = cart
+        storage.save_carts(carts)
 
+        await interaction.response.send_message(
+            f"🛒 **{product['name']}** adicionado ao carrinho "
+            f"(quantidade: {cart[self.product_id]}).\n"
+            "Use `/carrinho ver` para revisar e finalizar seu pedido.",
+            ephemeral=True,
+        )
 
 class ProductView(discord.ui.View):
-    """View persistente (timeout=None) com o botão de compra do produto."""
+    """View persistente (timeout=None) com o botão de adicionar ao carrinho."""
 
     def __init__(self, product_id: str):
         super().__init__(timeout=None)
         self.product_id = product_id
-        self.add_item(BuyButton(product_id))
+        self.add_item(CartButton(product_id))
 
 
 def is_staff():

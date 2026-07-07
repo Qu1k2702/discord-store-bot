@@ -7,6 +7,7 @@ DATA_DIR.mkdir(exist_ok=True)
 
 PRODUCTS_FILE = DATA_DIR / "products.json"
 TICKETS_FILE = DATA_DIR / "tickets.json"
+CARTS_FILE = DATA_DIR / "carts.json"
 
 _lock = Lock()
 
@@ -54,3 +55,13 @@ def next_product_id(products: dict) -> str:
     if not products:
         return "1"
     return str(max(int(k) for k in products.keys()) + 1)
+
+def load_carts() -> dict:
+    """Retorna {"user_id": {"product_id": quantidade, ...}}"""
+    with _lock:
+        return _load(CARTS_FILE, {})
+
+
+def save_carts(carts: dict) -> None:
+    with _lock:
+        _save(CARTS_FILE, carts)

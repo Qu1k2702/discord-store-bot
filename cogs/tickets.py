@@ -4,23 +4,28 @@ import discord
 from discord.ext import commands
 
 import config
-from utils import storage
+from utils import storage, pricing
 
 
-async def create_ticket_for_product(
-    interaction: discord.Interaction, product_id: str, product: dict
-) -> None:
-    """Cria um canal de ticket privado já informando o produto selecionado.
+async def create_ticket_for_cart(
+    interaction: discord.Interaction, cart: dict, products: dict
+) -> bool:
+    """Cria um canal de ticket privado com TODOS os itens do carrinho do usuário.
+
+    `cart` é {product_id: quantidade}. `products` é o catálogo completo.
 
     Regra de negócio: cada usuário só pode ter UMA solicitação (ticket)
-    aberta por vez, independente do produto.
+    aberta por vez — mas esse ticket pode conter vários produtos.
+
+    Retorna True se o ticket foi criado, False se foi bloqueado
+    (ex: usuário já tem ticket aberto).
     """
     guild = interaction.guild
     if guild is None:
         await interaction.response.send_message(
             "Este botão só pode ser usado dentro de um servidor.", ephemeral=True
         )
-        return
+        return False
 
     tickets = storage.load_tickets()
     user_key = str(interaction.user.id)
@@ -34,8 +39,7 @@ async def create_ticket_for_product(
                 f"abrir uma nova: {existing_channel.mention}",
                 ephemeral=True,
             )
-            return
-        # Canal não existe mais (foi apagado manualmente) -> limpa o registro órfão
+            return False
         del tickets[user_key]
         storage.save_tickets(tickets)
 
@@ -49,8 +53,6 @@ async def create_ticket_for_product(
         guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
     }
 
-    # Apenas o cargo de moderador (configurado) enxerga os tickets, além do
-    # próprio cliente e do bot.
     if config.STAFF_ROLE_ID:
         staff_role = guild.get_role(config.STAFF_ROLE_ID)
         if staff_role:
@@ -74,28 +76,38 @@ async def create_ticket_for_product(
         reason=f"Ticket de compra aberto por {interaction.user} ({interaction.user.id})",
     )
 
+    total = 0.0
     embed = discord.Embed(
         title="🎫 Novo pedido de compra",
         description=(
-            f"Olá {interaction.user.mention}! Recebemos seu interesse de compra.\n"
-            "Um atendente vai te ajudar por aqui em breve."
+            f"Olá {interaction.user.mention}! Recebemos seu pedido com "
+            f"{len(cart)} item(ns). Um atendente vai te ajudar por aqui em breve."
         ),
         color=discord.Color.green(),
     )
-    embed.add_field(name="Produto", value=product.get("name", "Desconhecido"), inline=True)
-    embed.add_field(name="Preço", value=f"R$ {product.get('price', '?')}", inline=True)
-    if product.get("stock") is not None:
-        embed.add_field(name="Estoque", value=str(product["stock"]), inline=True)
-    if product.get("description"):
-        embed.add_field(name="Descrição", value=product["description"], inline=False)
-    if product.get("image"):
-        embed.set_thumbnail(url=product["image"])
-    embed.set_footer(text=f"ID do produto: {product_id} • Cliente: {interaction.user}")
+    for product_id, qty in cart.items():
+        product = products[product_id]
+        try:
+            price = pricing.parse_price(str(product.get("price", "0")))
+        except ValueError:
+            price = 0.0
+        subtotal = price * qty
+        total += subtotal
+        valor_txt = f"{qty}x R$ {price:.2f} = R$ {subtotal:.2f}"
+        if product.get("description"):
+            valor_txt += f"\n{product['description']}"
+        embed.add_field(
+            name=f"{product.get('name', 'Produto')} (ID {product_id})",
+            value=valor_txt,
+            inline=False,
+        )
+    embed.add_field(name="Total do pedido", value=f"R$ {total:.2f}", inline=False)
+    embed.set_footer(text=f"Cliente: {interaction.user}")
 
     staff_mention = f"<@&{config.STAFF_ROLE_ID}>" if config.STAFF_ROLE_ID else ""
     await ticket_channel.send(content=staff_mention or None, embed=embed, view=CloseTicketView())
 
-    tickets[user_key] = {"channel_id": ticket_channel.id, "product_id": product_id}
+    tickets[user_key] = {"channel_id": ticket_channel.id, "items": cart}
     storage.save_tickets(tickets)
 
     try:
@@ -104,6 +116,8 @@ async def create_ticket_for_product(
         )
     except discord.NotFound:
         pass
+
+    return True
 
 
 class CloseTicketView(discord.ui.View):
