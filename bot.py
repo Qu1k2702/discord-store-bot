@@ -28,8 +28,8 @@ class StoreBot(commands.Bot):
         from cogs.tickets import CloseTicketView
 
         products = storage.load_products()
-        for product_id in products:
-            self.add_view(ProductView(product_id))
+        for product_id, product in products.items():
+            self.add_view(ProductView(product_id, product))
 
         self.add_view(CloseTicketView())
 

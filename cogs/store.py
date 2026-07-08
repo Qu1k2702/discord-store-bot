@@ -1,23 +1,23 @@
 import discord
 from discord import app_commands
 from discord.ext import commands
+from discord.ui import (
+    LayoutView,
+    Container,
+    TextDisplay,
+    Section,
+    Thumbnail,
+    Separator,
+    ActionRow,
+)
 
 from utils import storage
 
 
-def build_product_embed(product_id: str, product: dict) -> discord.Embed:
-    embed = discord.Embed(
-        title=product.get("name", "Produto"),
-        description=product.get("description") or "Sem descrição.",
-        color=discord.Color.blurple(),
-    )
-    embed.add_field(name="Preço", value=f"R$ {product.get('price', '?')}", inline=True)
-    if product.get("stock") is not None:
-        embed.add_field(name="Estoque", value=str(product["stock"]), inline=True)
-    if product.get("image"):
-        embed.set_image(url=product["image"])
-    embed.set_footer(text=f"ID do produto: {product_id}")
-    return embed
+def build_product_view(product_id: str, product: dict) -> "ProductView":
+    """Monta a LayoutView (Components V2) de exibição de um produto,
+    já com o botão de adicionar ao carrinho incluso."""
+    return ProductView(product_id, product)
 
 
 class CartButton(discord.ui.Button):
@@ -54,13 +54,45 @@ class CartButton(discord.ui.Button):
             ephemeral=True,
         )
 
-class ProductView(discord.ui.View):
-    """View persistente (timeout=None) com o botão de adicionar ao carrinho."""
 
-    def __init__(self, product_id: str):
+class ProductView(LayoutView):
+    """LayoutView persistente (timeout=None) com as infos do produto
+    em Components V2 e o botão de adicionar ao carrinho."""
+
+    def __init__(self, product_id: str, product: dict):
         super().__init__(timeout=None)
         self.product_id = product_id
-        self.add_item(CartButton(product_id))
+
+        name = product.get("name", "Produto")
+        description = product.get("description") or "Sem descrição."
+
+        container = Container(accent_color=discord.Color.blurple())
+
+        header_text = f"## {name}\n{description}"
+        if product.get("image"):
+            container.add_item(
+                Section(
+                    TextDisplay(header_text),
+                    accessory=Thumbnail(product["image"]),
+                )
+            )
+        else:
+            container.add_item(TextDisplay(header_text))
+
+        container.add_item(Separator())
+
+        info_lines = [f"**Preço:** R$ {product.get('price', '?')}"]
+        if product.get("stock") is not None:
+            info_lines.append(f"**Estoque:** {product['stock']}")
+        container.add_item(TextDisplay("\n".join(info_lines)))
+
+        container.add_item(Separator())
+        container.add_item(
+            ActionRow(CartButton(product_id))
+        )
+        container.add_item(TextDisplay(f"-# ID do produto: {product_id}"))
+
+        self.add_item(container)
 
 
 def is_staff():
@@ -116,13 +148,13 @@ class StoreCog(commands.Cog):
             "stock": estoque,
         }
 
-        embed = build_product_embed(product_id, product)
-        view = ProductView(product_id)
+        view = build_product_view(product_id, product)
 
         await interaction.response.send_message(
             f"Produto **{nome}** cadastrado com ID `{product_id}`.", ephemeral=True
         )
-        message = await interaction.channel.send(embed=embed, view=view)
+        # Components V2 não pode ser combinado com `content=` na mesma mensagem
+        message = await interaction.channel.send(view=view)
 
         product["channel_id"] = message.channel.id
         product["message_id"] = message.id
@@ -172,7 +204,7 @@ class StoreCog(commands.Cog):
         products[id] = product
         storage.save_products(products)
 
-        # Atualiza a embed já publicada, se ela ainda existir
+        # Atualiza a mensagem do produto já publicada, se ela ainda existir
         channel_id = product.get("channel_id")
         message_id = product.get("message_id")
         updated_message = False
@@ -181,19 +213,19 @@ class StoreCog(commands.Cog):
             if channel:
                 try:
                     msg = await channel.fetch_message(message_id)
-                    await msg.edit(embed=build_product_embed(id, product))
+                    await msg.edit(view=build_product_view(id, product))
                     updated_message = True
                 except (discord.NotFound, discord.Forbidden):
                     pass
 
-        aviso = "" if updated_message else "\n(Não foi possível localizar a mensagem original para atualizar a embed.)"
+        aviso = "" if updated_message else "\n(Não foi possível localizar a mensagem original para atualizar.)"
         await interaction.response.send_message(
             f"Produto `{id}` atualizado com sucesso.{aviso}", ephemeral=True
         )
 
     @produto_group.command(
         name="republicar",
-        description="Reenvia a embed de um produto (útil se a mensagem original foi apagada)",
+        description="Reenvia a mensagem de um produto (útil se a mensagem original foi apagada)",
     )
     @app_commands.describe(id="ID do produto (veja em /produto listar)")
     @is_staff()
@@ -219,14 +251,13 @@ class StoreCog(commands.Cog):
                 except (discord.NotFound, discord.Forbidden):
                     pass
 
-        embed = build_product_embed(id, product)
-        view = ProductView(id)
+        view = build_product_view(id, product)
 
         await interaction.response.send_message(
-            f"Reenviando a embed do produto **{product['name']}** (ID `{id}`)...",
+            f"Reenviando a mensagem do produto **{product['name']}** (ID `{id}`)...",
             ephemeral=True,
         )
-        new_message = await interaction.channel.send(embed=embed, view=view)
+        new_message = await interaction.channel.send(view=view)
 
         product["channel_id"] = new_message.channel.id
         product["message_id"] = new_message.id
@@ -278,12 +309,15 @@ class StoreCog(commands.Cog):
             f"`{pid}` — **{p['name']}** — R$ {p.get('price', '?')}"
             for pid, p in products.items()
         ]
-        embed = discord.Embed(
-            title="📦 Produtos cadastrados",
-            description="\n".join(linhas),
-            color=discord.Color.blurple(),
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        view = LayoutView()
+        container = Container(accent_color=discord.Color.blurple())
+        container.add_item(TextDisplay("## 📦 Produtos cadastrados"))
+        container.add_item(Separator())
+        container.add_item(TextDisplay("\n".join(linhas)))
+        view.add_item(container)
+
+        await interaction.response.send_message(view=view, ephemeral=True)
 
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
